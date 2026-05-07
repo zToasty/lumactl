@@ -1,0 +1,18 @@
+# Конфигурационный файл lumactl
+# Расположение по умолчанию: ~/.config/lumactl/config.yaml
+
+device:
+    # port: "auto" - автоматический поиск по VID/PID (рекомендуется)
+    # port: "/dev/ttyUSB0" - жесткая привязка к конкретному порту
+    port: "auto"
+    vid: "1a86"
+    pid: "7523"
+
+    # Количество светодиодов. Для Skydimo аппаратно зафиксировано на 255.
+    led_count: 255
+
+logging:
+    # Уровень детализации логов: debug, info, warn, error
+    level: "info"
+    # Формат вывода: text (для терминала) или json (для systemd)
+    format: "text"
