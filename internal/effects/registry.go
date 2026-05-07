@@ -2,6 +2,7 @@ package effects
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -42,7 +43,7 @@ func NewManager(p protocol.DeviceProvider, leds int) *Manager {
 	}
 }
 
-func (m *Manager) SwitchEffect(name string) error {
+func (m *Manager) SwitchEffect(name string, params json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -63,7 +64,7 @@ func (m *Manager) SwitchEffect(name string) error {
 	slog.Info("Switching effect", "name", name)
 
 	go func() {
-		if err := effect.Run(ctx, m.provider, m.ledCount); err != nil {
+		if err := effect.Run(ctx, m.provider, m.ledCount, params); err != nil {
 			slog.Error("Effect execution failed", "name", name, "error", err)
 		}
 	}()

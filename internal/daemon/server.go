@@ -76,7 +76,7 @@ func (s *Server) processCommand(cmd Command) {
 	switch cmd.Action {
 	case "switch":
 		slog.Info("Received switch command", "effect", cmd.Effect)
-		if err := s.manager.SwitchEffect(cmd.Effect); err != nil {
+		if err := s.manager.SwitchEffect(cmd.Effect, cmd.Params); err != nil {
 			slog.Error("Failed to switch effect", "effect", cmd.Effect, "error", err)
 		}
 	case "stop":
