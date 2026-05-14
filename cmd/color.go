@@ -1,91 +1,62 @@
 package cmd
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/zToasty/lumactl/internal/discovery"
-	"github.com/zToasty/lumactl/internal/effects"
-	"github.com/zToasty/lumactl/internal/protocol"
+	"github.com/zToasty/lumactl/internal/daemon"
 )
 
 var colorCmd = &cobra.Command{
-	Use:   "color [color_name]",
-	Short: "Set static color (red, green, blue, white, off)",
+	Use:   "color [color_name_or_hex]",
+	Short: "Set static color (red, green, blue, white, off, #FF00FF)",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		colorName := args[0]
-		var c protocol.RGB
+		colorArg := args[0]
 
-		// 1. Simple color parser
-		switch colorName {
-		case "red":
-			c = protocol.RGB{R: 255, G: 0, B: 0}
-		case "green":
-			c = protocol.RGB{R: 0, G: 255, B: 0}
-		case "blue":
-			c = protocol.RGB{R: 0, G: 0, B: 255}
-		case "white":
-			c = protocol.RGB{R: 255, G: 255, B: 255}
-		case "off", "black":
-			c = protocol.RGB{R: 0, G: 0, B: 0}
-		default:
-			slog.Error("Unknown color. Supported colors: red, green, blue, white, off", "color", colorName)
-			os.Exit(1)
-		}
+		var payload daemon.Command
 
-		// 2. Find port (using logic from config)
-		portName := cfg.Device.Port
-		if portName == "auto" {
-			foundPort, err := discovery.FindDevicePort(cfg.Device.VID, cfg.Device.PID)
-			if err != nil {
-				slog.Error("Device not found", "error", err)
-				os.Exit(1)
+		// Обрабатываем команду выключения красиво
+		if colorArg == "off" || colorArg == "black" {
+			payload = daemon.Command{
+				Action: "stop",
 			}
-			portName = foundPort
+		} else {
+			// Все остальные цвета (имена или HEX) отправляем в эффект static
+			payload = daemon.Command{
+				Action: "switch",
+				Effect: "static",
+				Params: json.RawMessage(fmt.Sprintf(`{"color": "%s"}`, colorArg)),
+			}
 		}
 
-		// 3. Connect to the device
-		provider := protocol.NewAdalightProvider(portName, cfg.Device.LEDCount)
-		if err := provider.Init(); err != nil {
-			slog.Error("Failed to connect to port", "error", err)
+		// 1. Пакуем в JSON
+		data, err := json.Marshal(payload)
+		if err != nil {
+			slog.Error("failed to encode command", "error", err)
 			os.Exit(1)
 		}
-		// Guarantee port closing on exit
-		defer provider.Close()
 
-		// 4. Context magic and Ctrl+C interception
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		// 2. Подключаемся к демону (как к локальному серверу)
+		conn, err := net.Dial("unix", daemon.SocketPath)
+		if err != nil {
+			slog.Error("Failed to connect to daemon. Is it running?", "error", err)
+			fmt.Println("Подсказка: запустите сервер командой ./lumactl (или ./lumactl daemon)")
+			os.Exit(1)
+		}
+		defer conn.Close()
 
-		// Create channel for Linux system signals (SIGINT = Ctrl+C)
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-		// Run background goroutine waiting for Ctrl+C
-		go func() {
-			<-sigs // Blocked here until Ctrl+C
-			fmt.Println("\nTermination signal received. Turning off backlight...")
-			cancel() // Sends drop to ctx.Done() pipe!
-		}()
-
-		// 5. Run effect
-		slog.Info("Starting static color", "color", colorName, "port", portName, "leds", cfg.Device.LEDCount)
-		effect := &effects.Static{Color: c}
-
-		// Blocks until cancel() is called
-		if err := effect.Run(ctx, provider, cfg.Device.LEDCount); err != nil {
-			slog.Error("Effect execution failed", "error", err)
+		// 3. Отправляем приказ и сразу завершаем работу
+		if _, err := conn.Write(data); err != nil {
+			slog.Error("failed to send command to daemon", "error", err)
+			os.Exit(1)
 		}
 
-		// 6. Turn off LEDs before exiting
-		provider.SetColors(make([]protocol.RGB, cfg.Device.LEDCount))
-		slog.Info("Backlight turned off")
+		slog.Info("Command sent to daemon", "color", colorArg)
 	},
 }
 
