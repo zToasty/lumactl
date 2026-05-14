@@ -20,6 +20,12 @@ type Command struct {
 	Params json.RawMessage `json:"params"` // дополнительные аргументы в будущем
 }
 
+type Response struct {
+	Status  string          `json:"status"`
+	Message string          `json:"message,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
 type Server struct {
 	manager *effects.Manager
 }
@@ -68,21 +74,39 @@ func (s *Server) handleConnection(conn net.Conn) {
 			break
 		}
 
-		s.processCommand(cmd)
+		s.processCommand(conn, cmd)
 	}
 }
 
-func (s *Server) processCommand(cmd Command) {
+func (s *Server) processCommand(conn net.Conn, cmd Command) {
+	var resp Response
+	encoder := json.NewEncoder(conn)
+
 	switch cmd.Action {
 	case "switch":
 		slog.Info("Received switch command", "effect", cmd.Effect)
 		if err := s.manager.SwitchEffect(cmd.Effect, cmd.Params); err != nil {
-			slog.Error("Failed to switch effect", "effect", cmd.Effect, "error", err)
+			resp = Response{Status: "error", Message: err.Error()}
+		} else {
+			resp = Response{Status: "ok"}
 		}
+
 	case "stop":
 		slog.Info("Received stop command")
 		s.manager.Stop()
+		resp = Response{Status: "ok"}
+
+	case "status":
+		current := s.manager.GetStatus()
+		data, _ := json.Marshal(map[string]string{"active_effect": current})
+		resp = Response{Status: "ok", Data: data}
+
 	default:
 		slog.Warn("Received unknown action", "action", cmd.Action)
+		resp = Response{Status: "error", Message: "unknown action"}
+	}
+
+	if err := encoder.Encode(resp); err != nil {
+		slog.Error("Failed to send response", "error", err)
 	}
 }

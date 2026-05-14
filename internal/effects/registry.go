@@ -12,7 +12,8 @@ import (
 
 // registry — внутренняя карта всех доступных эффектов
 var registry = map[string]Effect{
-	"static": &Static{},
+	"static":          &Static{},
+	"liquid_spectrum": &LiquidSpectrum{},
 
 	// "rainbow": &Rainbow{},
 	// "ambient": &Ambient{},
@@ -31,6 +32,7 @@ func GetEffect(name string) (Effect, error) {
 type Manager struct {
 	mu           sync.Mutex
 	activeCancel context.CancelFunc
+	activeName   string
 	provider     protocol.DeviceProvider
 	ledCount     int
 }
@@ -63,6 +65,8 @@ func (m *Manager) SwitchEffect(name string, params json.RawMessage) error {
 
 	slog.Info("Switching effect", "name", name)
 
+	m.activeName = name
+
 	go func() {
 		if err := effect.Run(ctx, m.provider, m.ledCount, params); err != nil {
 			slog.Error("Effect execution failed", "name", name, "error", err)
@@ -76,6 +80,8 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	m.activeName = "off"
+
 	if m.activeCancel != nil {
 		slog.Info("stopping active effect and turning off LEDs")
 		m.activeCancel()
@@ -86,4 +92,13 @@ func (m *Manager) Stop() {
 	if err := m.provider.SetColors(black); err != nil {
 		slog.Error("failed to turn off LEDs during stop", "error", err)
 	}
+}
+
+func (m *Manager) GetStatus() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeName == "" {
+		return "off"
+	}
+	return m.activeName
 }
